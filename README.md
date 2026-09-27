@@ -19,3 +19,11 @@ This is a local demo. The order list has no authentication, so keep the server b
 ## Vercel
 
 The `api/` functions use a **private Vercel Blob store** for hosted orders. Connect a private Blob store to the Vercel project so `BLOB_READ_WRITE_TOKEN` is available to its functions. Without it, checkout returns an error and leaves the cart intact. The hosted Orders page has no authentication, so do not use real customer details in this demo.
+
+To deploy the current local files to the linked production project, run:
+
+```sh
+npm run deploy
+```
+
+Sign in first with `npx vercel login` if using a new machine, then link the project with `npx vercel link --yes --project goodcart-demo`. This command deploys directly to Vercel; push commits to GitHub separately.

@@ -3,8 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "deploy": "npx --yes vercel@60.1.3 deploy --prod --yes"
   },
-  "dependencies": { "@vercel/blob": "^2.3.0" },
-  "engines": { "node": ">=18" }
+  "dependencies": {
+    "@vercel/blob": "^2.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }
