@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>GoodCart — Everyday finds, made easy</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="announcement">A little more joy in every delivery <span>✦</span> Free shipping on orders $75+</div>
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="GoodCart home"><span class="brand-icon">✳</span> goodcart<span class="brand-dot">.</span></a>
+    <form class="search" id="search-form" role="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+      <input id="search-input" type="search" placeholder="Search for something good..." aria-label="Search products" />
+      <button type="submit">Search</button>
+    </form>
+    <a class="orders-link" href="orders.html">Orders</a><button class="cart-trigger" id="cart-trigger" aria-label="Open cart"><span class="cart-symbol">♧</span><span>Cart</span><span class="cart-count" id="cart-count">0</span></button>
+  </header>
+
+  <main id="app">
+    <section class="hero">
+      <div class="hero-copy"><span class="eyebrow">THE EVERYDAY EDIT</span><h1>Good things for<br /><em>every day.</em></h1><p>Thoughtful finds for your home, your routine, and everything in between.</p><button class="primary-button" id="hero-shop">Shop the collection <span>↗</span></button></div>
+      <div class="hero-art" aria-hidden="true"><div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div><span class="hero-plant">🪴</span><span class="hero-lamp">💡</span><span class="hero-headphones">🎧</span><span class="art-sparkle sparkle-one">✳</span><span class="art-sparkle sparkle-two">✳</span><div class="hero-label">find your new favorite <span>↗</span></div></div>
+    </section>
+
+    <section class="benefits" aria-label="Shopping benefits"><div><span>✦</span><strong>Curated for you</strong><small>Only the good stuff</small></div><div><span>↗</span><strong>Fast & easy</strong><small>Simple shopping, always</small></div><div><span>♡</span><strong>Made to love</strong><small>Favorites for every day</small></div></section>
+
+    <section class="products-section" id="products-section"><div class="section-top"><div><span class="eyebrow">EXPLORE THE COLLECTION</span><h2>Find your next favorite<span>.</span></h2></div><p>Small upgrades. Big everyday energy.</p></div><div class="catalog-toolbar"><div class="filters" id="filters" role="group" aria-label="Filter by category"></div><label class="sort-label">Sort by <select id="sort-select" aria-label="Sort products"><option value="featured">Featured</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="rating">Top rated</option></select></label></div><div class="result-line" id="result-line"></div><div class="product-grid" id="product-grid"></div><div class="empty-results" id="empty-results" hidden><span>⌕</span><h3>No products found</h3><p>Try another search or category.</p><button class="secondary-button" id="clear-search">Clear filters</button></div></section>
+  </main>
+
+  <footer><a class="brand" href="#"><span class="brand-icon">✳</span> goodcart<span class="brand-dot">.</span></a><p>Good finds. Good days. GoodCart.</p><span>© 2026 GoodCart</span></footer>
+
+  <div class="overlay" id="overlay" hidden></div>
+  <aside class="cart-panel" id="cart-panel" role="dialog" aria-modal="true" aria-label="Shopping cart" aria-hidden="true"><div class="panel-header"><div><span class="eyebrow">YOUR PICKS</span><h2>Your cart <span id="cart-heading-count">(0)</span></h2></div><button class="icon-button" id="close-cart" aria-label="Close cart">×</button></div><div class="cart-items" id="cart-items"></div><div class="cart-footer" id="cart-footer"></div></aside>
+
+  <div class="detail-modal" id="detail-modal" role="dialog" aria-modal="true" aria-label="Product details" aria-hidden="true"><button class="icon-button detail-close" id="close-detail" aria-label="Close product details">×</button><div id="detail-content"></div></div>
+
+  <div class="checkout-modal" id="checkout-modal" role="dialog" aria-modal="true" aria-label="Checkout" aria-hidden="true"><div class="checkout-header"><div><span class="eyebrow">ALMOST THERE</span><h2>Checkout<span>.</span></h2></div><button class="icon-button" id="close-checkout" aria-label="Close checkout">×</button></div><div id="checkout-content"></div></div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="script.js" defer></script>
+</body>
+</html>
