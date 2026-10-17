@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — GoodCart</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="announcement">GoodCart demo order management</div>
+  <header class="site-header">
+    <a class="brand" href="index.html"><span class="brand-icon">✳</span> goodcart<span class="brand-dot">.</span></a>
+    <a class="orders-link" href="orders.html">View orders</a>
+    <a class="orders-link" href="index.html">Back to shop</a>
+  </header>
+  <main class="orders-main admin-main">
+    <div class="section-top"><div><span class="eyebrow">LOCAL DEMO</span><h2>Admin<span>.</span></h2></div><p>Update an order by its ID.</p></div>
+    <form id="status-form" class="admin-form">
+      <label for="order-id">Order ID</label>
+      <input id="order-id" name="orderId" type="text" placeholder="GC-1234ABCD" autocomplete="off" required>
+      <label for="order-status">Status</label>
+      <select id="order-status" name="status">
+        <option value="Processing">Processing</option>
+        <option value="Shipped">Shipped</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <button class="primary-button" type="submit">Update status</button>
+      <p id="admin-feedback" class="admin-feedback" role="status" aria-live="polite"></p>
+    </form>
+  </main>
+  <footer><a class="brand" href="index.html"><span class="brand-icon">✳</span> goodcart<span class="brand-dot">.</span></a><p>Good finds. Good days. GoodCart.</p><span>© 2026 GoodCart</span></footer>
+  <script src="admin.js" defer></script>
+</body>
+</html>

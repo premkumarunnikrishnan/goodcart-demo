@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
+    "test": "node --test",
     "deploy": "npx --yes vercel@60.1.3 deploy --prod --yes"
   },
   "dependencies": {

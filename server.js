@@ -18,9 +18,11 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/orders.html', ['orders.html', 'text/html; charset=utf-8']],
+  ['/admin.html', ['admin.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/script.js', ['script.js', 'text/javascript; charset=utf-8']],
-  ['/orders.js', ['orders.js', 'text/javascript; charset=utf-8']]
+  ['/orders.js', ['orders.js', 'text/javascript; charset=utf-8']],
+  ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']]
 ]);
 let writeQueue = Promise.resolve();
 
@@ -30,8 +32,23 @@ function send(res, status, value) {
   res.end(body);
 }
 async function readOrders() {
-  try { return JSON.parse(await fs.readFile(ordersFile, 'utf8')); }
+  try { return JSON.parse(await fs.readFile(ordersFile, 'utf8')).map(order => ({...order, status:order.status === 'New' ? 'Processing' : order.status})); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+function publicOrder(order) {
+  const {cleanupToken, cleanupTokenHash, ...visible} = order;
+  return visible;
+}
+function isTestEmail(email) {
+  return /^(?:qa\.autoreg|autoreg(?:\+[^@]+)?)@example\.com$/i.test(email || '');
+}
+function isTestOrder(order) {
+  return isTestEmail(order?.customer?.email);
+}
+function canCleanupOrder(order, token) {
+  if (!order || !isTestOrder(order) || !/^[a-f0-9]{64}$/.test(token || '') || !/^[a-f0-9]{64}$/.test(order.cleanupTokenHash || '')) return false;
+  const hash = crypto.createHash('sha256').update(token).digest();
+  return crypto.timingSafeEqual(hash, Buffer.from(order.cleanupTokenHash, 'hex'));
 }
 function updateOrders(change) {
   const task = writeQueue.then(async () => {
@@ -66,26 +83,40 @@ function createOrder(input) {
   });
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
   const shipping = subtotal >= 75 ? 0 : 7.95;
+  const cleanupToken = isTestEmail(customer.email.trim()) ? crypto.randomBytes(32).toString('hex') : null;
   return {
     id:'GC-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
-    createdAt:new Date().toISOString(), status:'New',
+    createdAt:new Date().toISOString(), status:'Processing',
     customer:Object.fromEntries(['email','firstName','lastName','address','city','state','zip'].map(key => [key,customer[key].trim()])),
-    items, subtotal, shipping, total:Math.round((subtotal + shipping)*100)/100
+    items, subtotal, shipping, total:Math.round((subtotal + shipping)*100)/100,
+    ...(cleanupToken ? {cleanupToken, cleanupTokenHash:crypto.createHash('sha256').update(cleanupToken).digest('hex')} : {})
   };
 }
 
 const server = http.createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, 'http://localhost').pathname;
-    if (pathname === '/api/orders' && req.method === 'GET') return send(res, 200, await readOrders());
+    if (pathname === '/api/orders' && req.method === 'GET') return send(res, 200, (await readOrders()).map(publicOrder));
     if (pathname === '/api/orders' && req.method === 'POST') {
       const order = createOrder(await bodyJson(req));
-      await updateOrders(orders => { orders.unshift(order); return order; });
-      return send(res, 201, order);
+      const {cleanupToken, ...storedOrder} = order;
+      await updateOrders(orders => { orders.unshift(storedOrder); return storedOrder; });
+      return send(res, 201, {...publicOrder(storedOrder), ...(cleanupToken ? {cleanupToken} : {})});
+    }
+    if (pathname === '/api/order-cleanup' && req.method === 'DELETE') {
+      const {id, token} = await bodyJson(req);
+      if (!/^GC-[A-F0-9]{8}$/.test(id || '') || !/^[a-f0-9]{64}$/.test(token || '')) return send(res, 400, {error:'Invalid cleanup request.'});
+      const deleted = await updateOrders(orders => {
+        const index = orders.findIndex(order => order.id === id);
+        if (index < 0 || !canCleanupOrder(orders[index], token)) return false;
+        orders.splice(index, 1);
+        return true;
+      });
+      return deleted ? send(res, 200, {id, deleted:true}) : send(res, 404, {error:'Test order not found or cleanup token is invalid.'});
     }
     if (pathname === '/api/order-status' && req.method === 'PATCH') {
       const input = await bodyJson(req);
-      if (!/^GC-[A-F0-9]{8}$/.test(input.id || '') || !['New','Processing','Completed'].includes(input.status)) return send(res, 400, {error:'Invalid order or status.'});
+      if (!/^GC-[A-F0-9]{8}$/.test(input.id || '') || !['Processing','Shipped','Completed'].includes(input.status)) return send(res, 400, {error:'Invalid order or status.'});
       const updated = await updateOrders(orders => {
         const order = orders.find(o => o.id === input.id);
         if (order) order.status = input.status;
@@ -96,7 +127,7 @@ const server = http.createServer(async (req, res) => {
     const statusMatch = pathname.match(/^\/api\/orders\/(GC-[A-F0-9]{8})\/status$/);
     if (statusMatch && req.method === 'PATCH') {
       const input = await bodyJson(req);
-      if (!['New','Processing','Completed'].includes(input.status)) return send(res, 400, {error:'Invalid status.'});
+      if (!['Processing','Shipped','Completed'].includes(input.status)) return send(res, 400, {error:'Invalid status.'});
       const updated = await updateOrders(orders => {
         const order = orders.find(o => o.id === statusMatch[1]);
         if (order) order.status = input.status;
@@ -116,4 +147,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 if (require.main === module) server.listen(port, '127.0.0.1', () => console.log(`GoodCart running at http://127.0.0.1:${port}`));
-module.exports = {server,createOrder};
+module.exports = {server,createOrder,publicOrder,canCleanupOrder};

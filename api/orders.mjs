@@ -1,14 +1,16 @@
 import {get, list, put} from '@vercel/blob';
 import localServer from '../server.js';
 
-const {createOrder} = localServer;
+const {createOrder, publicOrder} = localServer;
 const options = {access:'private'};
 const response = (value, status = 200) => Response.json(value, {status, headers:{'cache-control':'no-store'}});
 
 async function readOrder(pathname) {
   const result = await get(pathname, options);
   if (!result || result.statusCode !== 200) return null;
-  return new Response(result.stream).json();
+  const order = await new Response(result.stream).json();
+  if (order.status === 'New') order.status = 'Processing';
+  return publicOrder(order);
 }
 
 export async function GET() {
@@ -30,8 +32,9 @@ export async function POST(request) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return response({error:'Order storage is not connected.'}, 503);
   try {
     const order = createOrder(await request.json());
-    await put(`orders/${order.id}.json`, JSON.stringify(order), {...options, contentType:'application/json', addRandomSuffix:false, cacheControlMaxAge:0});
-    return response(order, 201);
+    const {cleanupToken, ...storedOrder} = order;
+    await put(`orders/${order.id}.json`, JSON.stringify(storedOrder), {...options, contentType:'application/json', addRandomSuffix:false, cacheControlMaxAge:0});
+    return response({...publicOrder(storedOrder), ...(cleanupToken ? {cleanupToken} : {})}, 201);
   } catch (error) {
     const userError = /^(Cart |Please )/.test(error.message);
     return response({error:userError?error.message:'Could not save order.'}, userError?400:500);

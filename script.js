@@ -54,6 +54,7 @@ async function placeOrder(event){
     const response=await fetch('/api/orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customer,items})});
     const result=await response.json();
     if(!response.ok)throw new Error(result.error||'Could not save the order.');
+    if(result.cleanupToken)sessionStorage.setItem(`goodcart-test-cleanup:${result.id}`,result.cleanupToken);
     cart={};saveCart();
     $('checkout-content').innerHTML=`<div class="success-view"><div class="success-icon">✓</div><h3>Order placed!</h3><p>Your demo order was saved. No payment was processed and nothing will be shipped.</p><div class="order-number">Order ${result.id}</div><a class="primary-button" href="orders.html">View orders <span>↗</span></a><button class="secondary-button" id="back-to-shop" style="margin-top:12px">Back to shopping</button></div>`;
   }catch(error){toast(error.message||'Could not save the order.');button.disabled=false;button.innerHTML='Place demo order <span>↗</span>';}

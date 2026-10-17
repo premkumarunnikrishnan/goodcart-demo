@@ -6,7 +6,7 @@ export async function PATCH(request) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return response({error:'Order storage is not connected.'}, 503);
   try {
     const {id,status} = await request.json();
-    if (!/^GC-[A-F0-9]{8}$/.test(id || '') || !['New','Processing','Completed'].includes(status)) return response({error:'Invalid order or status.'}, 400);
+    if (!/^GC-[A-F0-9]{8}$/.test(id || '') || !['Processing','Shipped','Completed'].includes(status)) return response({error:'Invalid order or status.'}, 400);
     const pathname = `orders/${id}.json`;
     const result = await get(pathname, {access:'private'});
     if (!result || result.statusCode !== 200) return response({error:'Order not found.'}, 404);
