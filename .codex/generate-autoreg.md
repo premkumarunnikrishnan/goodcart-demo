@@ -1,46 +1,29 @@
 Generate the `autoreg.md` test specification for an AutoReg project by working out what kind of application this is and running the matching skill. This file is a **router**: it detects the project type, then reads and executes one of its sibling skills. It never analyses the app in depth, never writes `autoreg.md` itself, never signs anything and never calls the cloud.
 
-Skill version: 3.0.1
+Skill version: 4.0.0
 
 ```
 /generate-autoreg ──▶ check & determine project type ──┬── UI ────────▶ generate-ui-autoreg
                                                         ├── API ───────▶ generate-api-autoreg
-                                                        ├── BOTH ──────▶ generate-ui-autoreg ──ask──▶ generate-api-autoreg
+                                                        ├── BOTH ──────▶ generate-ui-autoreg ──────▶ generate-api-autoreg
                                                         └── LIB/other ─▶ not supported — say so and stop
 ```
 
 ---
 
-## Inputs from $ARGUMENTS
+## Inputs and shared storage
 
-Parse `$ARGUMENTS` as paths and flags, respecting quotes around paths with spaces:
-- **Router flags** (recognised here, removed before dispatch): `--ui`, `--api`, `--both` — force the project type and skip detection.
-- **Mode flags** (`--full`, `--delta`, `--bootstrap`, or any other `--flag`): pass through to the sub-skill **unchanged**, after the resolved paths.
-- Token 1 (file path): **project folder** — the AutoReg project directory that contains the `.ar` manifest and where `autoreg.md` is written.
-- Token 2+ (file paths): **app source roots** — one or more roots of the application under test. Scan ALL of them for detection.
+Run `/generate-autoreg [--ui|--api|--both] [--full|--delta|--bootstrap]` from the application source workspace. The current workspace root is the app source. Do not ask for a workflow folder or app source path. If the workspace contains several independent apps, ask which application subfolder to analyze; otherwise use the current folder. Explicit additional source roots may be supplied for multi-repository apps.
 
-## Step 0 — Establish both paths BEFORE detecting or generating anything (mandatory)
+On Windows, `home = %USERPROFILE%`. For the directory containing the uploadable `autoreg.md`, compute `identity = path.resolve(root).replaceAll('\\','/').toLowerCase()`, `slug = path.basename(root).replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase() || 'app'`, and `hash = first 12 lowercase hex characters of SHA-256(identity)`. The internal workflow is `<home>/.local/.AutoReg/workflows/<slug>-<hash>/<ui|api>`. This matches the desktop app and extension. On Windows set the Hidden attribute on `<home>/.local/.AutoReg` (`attrib +h`); the desktop app and extension also do this when they run.
 
-The project/workflow folder and the app source roots are different roles. The current working directory is usually the **app source**, not the AutoReg workflow. Never silently use it as the project folder, search for a workflow and pick one, or infer that the two folders are the same.
-
-1. Resolve the current working directory to an absolute path. If **no path arguments** were supplied (including a flags-only invocation), ask the user in ONE message:
-   > I can use `<absolute current directory>` as the app source. Is that correct? What is the absolute path to your AutoReg workflow folder (the folder containing the `.ar` file and `tests/`, or the folder where a new workflow should be written)? If the app source is elsewhere or has multiple roots, give the exact path(s).
-   A reply such as "yes, workflow is `<path>`" confirms the current directory as the app source. Otherwise obtain the exact app source path(s). **Do not continue until the user has explicitly identified both roles.**
-2. If **only the workflow path** was supplied, read `.autoreg/baseline.json` only to *suggest* its `app.sourceRoots[].path` as the app source. If there is no usable baseline, suggest the current directory as the app source. Ask the user to confirm the suggested path(s) or supply the correct ones. Do not treat a saved baseline path as current authorization to scan it without this confirmation.
-3. If the user supplied both the workflow and app source path(s), state the resolved absolute paths and their roles before proceeding. If the paths are identical, or the first path appears to be app source rather than the intended workflow, ask the user to confirm that placement before writing anything.
-4. Check that every app source root exists and contains application source. The workflow folder may be new; for an existing workflow, confirm it is the folder with the expected `.ar` file and/or `autoreg.md` and `.autoreg/baseline.json`. If an existing baseline records different source roots from those just confirmed, stop and ask whether the app moved or this is the wrong workflow. Never silently analyse only a subset of the recorded roots.
-5. After confirmation, pass the **resolved absolute workflow path first** and **all resolved absolute app source roots next**, followed by mode flags, to the sibling skill. If user input is unavailable (for example in CI), stop with a short usage message requiring both paths; do not fall back to the current directory.
-
-This path check is distinct from the sub-skill's later questions about environment, credentials and test data. Complete it before Step 1 or Step 2 and before executing either sibling skill.
+All baselines, machine deltas, signed delta reports, defects, fixes, plans, tests, runs, manifests, environments, and other processing artifacts go into the private workflow. The only generated AutoReg file in the app source tree is the uploadable `autoreg.md`; keep a signed copy in the private workflow for the desktop agent. Never create `.autoreg/`, `autoreg.delta.md`, a signing request, or an `.ar` manifest in the app source tree. Pass the derived private workflow path first and the source root next to the sibling skill, followed by additional analysis roots and mode flags.
 
 ---
 
 ## Step 1 — Delta runs follow the baseline, not detection
 
-If `<project folder>/.autoreg/baseline.json` exists and parses as JSON:
-- `specKind` is `"api"` → dispatch **API**. `specKind` is `"ui"` → dispatch **UI**. Skip Step 2.
-- `specKind` is absent (a baseline written before this router existed) → run Step 2, but if the result is BOTH, dispatch **UI** only, because that baseline was produced by the UI skill. Say so in one line.
-- If detection disagrees with a present `specKind`, say so in one line and **follow the baseline**. A delta run must never silently switch spec kinds; the user can force the other kind with `--ui` / `--api` into a different project folder.
+Check the derived private `ui` and `api` workflow paths for the current source root, plus the `ui/` and `api/` spec subfolders when present. Read each `.autoreg/baseline.json` that exists. A single valid baseline selects its `specKind` for a delta run; two valid baselines select BOTH. A baseline without `specKind` belongs to the UI skill. Use the matching spec folder for each workflow. A forced other kind uses its own source spec and private workflow. If a baseline has a newer unsupported schema, stop and ask for an updated skill; never overwrite it.
 
 A `--ui` / `--api` / `--both` flag always wins over both the baseline and detection.
 
@@ -70,7 +53,7 @@ neither, or LIB        → NOT SUPPORTED
 Special cases — state them explicitly when they apply:
 
 - **Meta-frameworks with API routes** (Next.js `app/api/**/route.ts` or `pages/api/**`, Nuxt `server/api/**`, SvelteKit `+server.ts`, Remix resource routes): **BOTH**. The UI skill documents those routes as UI context; the API skill tests them directly.
-- **Monorepo** (`apps/*`, `packages/*`, `services/*`): classify per application package. Library packages inside `packages/` never turn the result into LIB. More than one application package → ask which one(s) to target, listing each with its evidence. Non-interactive: take the package whose name or `homepage` matches the `.ar` manifest URL, else the first application package, and say so.
+- **Monorepo** (`apps/*`, `packages/*`, `services/*`): classify each application package. Library packages do not turn the result into LIB. More than one application package → ask which application to target, listing the evidence. Non-interactive: choose the current app workspace if it contains one; otherwise stop and require a source subfolder.
 - **Ambiguous** (for example only an `openapi.yaml` plus static HTML docs; a `package.json` with both `react-dom` and `express` where Express only serves the built bundle — check for `express.static` and no other routes): ask one question — "This looks like an API described by `openapi.yaml`; no server framework is in `package.json`. Treat it as an API project? [API / UI / Both]". Non-interactive: API when an API description exists, else UI.
 - **NOT SUPPORTED**: print exactly one short paragraph — what was detected (name the files), why it reads as a library or CLI, and that AutoReg tests *running applications* (a UI in a browser, or an HTTP API). Suggest `--ui` or `--api` with an explicit source root if the detection is wrong. Then **stop**. Never generate a spec for a library.
 
@@ -90,39 +73,25 @@ The three skills are always installed side by side. Locate the sibling file **in
 - UI → `generate-ui-autoreg.<ext>`
 - API → `generate-api-autoreg.<ext>`
 
-Read the sibling file **in full** and execute it with the paths resolved in Step 0 and the remaining mode flags (router flags removed). Do not summarise it, do not paraphrase it, and do not substitute an older copy of it from memory — the sibling file on disk is the only authoritative version. If the sibling file is missing, stop and tell the user to reinstall the AutoReg skills from the AutoReg extension panel (or copy `generate-ui-autoreg` / `generate-api-autoreg` next to this file). Never attempt to generate the spec without it.
+Read the sibling file **in full** and execute it with the derived private workflow path, app source root, any additional analysis roots, and remaining mode flags (router flags removed). Do not summarise it, do not paraphrase it, and do not substitute an older copy of it from memory — the sibling file on disk is the only authoritative version. If the sibling file is missing, stop and tell the user to reinstall the AutoReg skills from the AutoReg extension panel (or copy `generate-ui-autoreg` / `generate-api-autoreg` next to this file). Never attempt to generate the spec without it.
 
 ### UI
 
-Execute `generate-ui-autoreg` with `<project folder> <roots…> [mode flags]`. That is the whole run.
+Execute `generate-ui-autoreg` with `<private UI workflow> <source root> <additional roots…> [mode flags]`. That is the whole run.
 
 ### API
 
-Execute `generate-api-autoreg` with `<project folder> <roots…> [mode flags]`. That is the whole run.
+Execute `generate-api-autoreg` with `<private API workflow> <source root> <additional roots…> [mode flags]`. That is the whole run.
 
-### BOTH — one spec per workflow, two workflows
+### BOTH — separate source specs and private workflows
 
-A single AutoReg workflow holds exactly one `autoreg.md`, one `.ar` manifest and one `.autoreg/baseline.json`. A UI spec and an API spec therefore go into **two workflow folders**:
-
-- UI spec → `<project folder>`
-- API spec → `<project folder>-api` (sibling folder; create it if needed, together with a copy of the `.ar` manifest whose `metadata.name` gets an `-api` suffix and whose `sources[0].url` is the API base URL once the API skill has established it)
-
-Flow:
-
-1. Announce `Project type: UI + API (evidence: …)`.
-2. Ask ONCE, batched: "I'll generate the UI spec into `<project folder>` and the API spec into `<project folder>-api` — each becomes its own AutoReg workflow. Start with the UI spec? Options: **Yes, UI first** · **API first** · **Only UI** · **Only API** · **Use different folders**." Non-interactive: UI first, then API, default folders.
-3. Run the first sub-skill to completion (it clarifies, analyses, writes, signs and persists its own baseline).
-4. Ask: "UI spec done — `<N>` scenarios, signed. Generate the API spec now into `<project folder>-api`?" (or the reverse). Non-interactive: proceed. If the second folder already exists and is not empty, ask before writing into it; non-interactively write into `<project folder>-api (2)` instead of overwriting.
-5. Run the second sub-skill to completion. It writes its **own** `.autoreg/baseline.json` in its own folder — the two specs never share a baseline, so later delta runs work per workflow.
-6. Print a final summary naming both files, and tell the user to create **one AutoReg workflow per folder** (the New Workflow dialog shows which kind of spec it imported).
-
-Answers the user gave to the first sub-skill's Phase 0 questions (base URL, credentials, seed data, write permission) carry over to the second: pass them along and do not re-ask what was already answered.
+If the app already has distinct UI and API source subfolders, write one `autoreg.md` in each. If both share one source root, create `<app root>/ui/autoreg.md` and `<app root>/api/autoreg.md`. These subfolders contain only the uploadable specs; analyze the shared app root as an additional source root. Derive each private workflow from the directory containing its spec, then run the corresponding sibling skill to completion. Carry answers about URLs, credentials, and test data from the first run into the second; ask only what differs. Keep the baselines and deltas separate.
 
 ---
 
 ## What this router must never do
 
 - Read application source files, run the clarification interview, write `autoreg.md`, sign anything, write a baseline, or call the cloud — those belong to the sub-skills.
-- Change the order or role of user-supplied paths. Missing paths may only be filled from the user's explicit Step 0 answer.
+- Ask for a workflow folder or app source path when the current workspace identifies the app. Derive each private workflow from the source spec's containing folder.
 - Generate a spec for a library, a CLI or an empty project.
 - Mix UI and API content into one `autoreg.md`.

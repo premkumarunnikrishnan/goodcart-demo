@@ -17,7 +17,7 @@ This skill runs in one of three modes. Pick one by looking at what is already on
 | No `autoreg.md`, no `.autoreg/baseline.json` | any | **FULL** | Phases 0–9 |
 | `autoreg.md` exists, but NO `.autoreg/baseline.json` | none | **BOOTSTRAP** → then DELTA | Phase B (adopt the existing spec), then D0–D10 |
 | Both exist, baseline valid, `specKind` is `"api"` (or absent and the spec has `**Spec type:** api`) | none or `--delta` | **DELTA** | Phases D0–D10 |
-| Both exist, baseline `specKind` is `"ui"` | any | **STOP** | This folder holds a UI workflow. Say so and tell the user to run the API skill into a different project folder (the router uses `<folder>-api`). Never overwrite a UI spec with an API spec. |
+| Both exist, baseline `specKind` is `"ui"` | any | **STOP** | This folder holds a UI workflow. Generate the API spec in the API source subfolder and its separately derived private API workflow. Never overwrite a UI spec with an API spec. |
 | Both exist | `--full` | **FULL** | Phases 0–9, but preserve scenario IDs by coverage key (see Phase 5.5) |
 | Baseline corrupt, unreadable, or `schemaVersion` newer than 1 | any | **FULL** | Say why in one line. Salvage `dataCatalog` + `openQuestions` from it first if the JSON parses at all |
 | DELTA finds more than 60% of features impacted | — | **recommend FULL** | Ask the user; non-interactively just run FULL and say so in the summary |
@@ -30,14 +30,9 @@ Announce the chosen mode in one line before you start work, e.g. `Mode: delta (b
 
 ## Inputs from $ARGUMENTS
 
-Parse `$ARGUMENTS` as paths and flags, respecting quotes around paths with spaces:
-- Any token starting with `--`: a **mode flag**. Recognised: `--full`, `--delta`, `--bootstrap`. Strip flags out before reading the paths below — they may appear in any position. Unknown `--flags` are ignored with a one-line note.
-- Token 1 (file path): **project folder** — the AutoReg project directory that contains the `.ar` manifest and where `autoreg.md` will be written
-- Token 2+ (file paths): **app source directories** — one or more roots of the application under test. Multiple tokens = multi-repo app (e.g. an API gateway plus a service repo). Scan ALL of them.
+For the mode table above, check `<app source root>/autoreg.md` for the spec and `<internal workflow>/.autoreg/baseline.json` for the baseline. A baseline with an unsupported newer schema must stop generation until the skill is updated; do not replace it with a full run.
 
-**Path resolution is mandatory before choosing a mode or reading application source.** The `generate-autoreg` router normally completes this check and passes both roles explicitly. If this skill is called directly with no paths, ask in one message whether the absolute current directory is the **app source** and for the absolute **AutoReg workflow folder** (the folder with the `.ar` file and `tests/`, or the intended new workflow folder). Do not continue until the user has explicitly identified both roles. If only the workflow path is supplied, show the source roots recorded in its `.autoreg/baseline.json` as suggestions (or the current directory when no baseline exists) and ask the user to confirm or replace them. Never silently treat the current directory as the workflow or silently reuse baseline source paths.
-
-State the resolved absolute workflow path and every app source path before proceeding. If they are the same path or conflict with an existing baseline's `app.sourceRoots[].path`, resolve that ambiguity with the user first. Check that all app source roots exist; if one moved, ask for its new path rather than silently analysing a subset. A new workflow folder is allowed; an existing one must match the intended `.ar` file or `autoreg.md`. If user input is unavailable, stop and request an invocation with both paths. Do not repeat this question when the router has already passed both confirmed paths.
+The app source is the current workspace root. Never ask for a workflow folder or app source path when invoked without paths. The router passes the derived internal workflow path first and the app source root second. When invoked directly, derive the internal workflow using the shared algorithm in `generate-autoreg` for kind `api`. Treat explicit extra paths as additional source roots. The directory containing the uploadable `autoreg.md` is the identity root used by the desktop app and extension. Keep all generated artifacts other than that source `autoreg.md` inside the hidden workflow. Read the source `autoreg.md` as authoritative and keep a signed copy in the hidden workflow for desktop processing.
 
 ---
 
@@ -67,7 +62,7 @@ Search the project folder for a file ending in `.ar` (e.g. `myapi.ar`). Read it 
 - `sources[0].autoregMd` — relative path where `autoreg.md` lives (default: `"autoreg.md"`)
 - `metadata.name` — project name
 
-If no `.ar` file exists, use the project folder name as the project name and `autoreg.md` as the output path. The base URL then comes from Phase 0 / server config.
+If no `.ar` file exists yet, use the app source folder name as the project name and `<app source root>/autoreg.md` as the output path. The desktop app creates the manifest under the hidden workflow when that signed spec is imported. The base URL comes from Phase 0 / server config.
 
 ---
 
@@ -215,7 +210,7 @@ TC ids come from `nextScenarioId` and only ever increase. **Never reuse the id o
 
 ## Phase 6 — Write `autoreg.md`
 
-Write the file to `{projectFolder}/{autoregMd}` (or `{projectFolder}/autoreg.md`). Use EXACTLY this structure (omit a section only if genuinely empty — say why in a one-line note):
+Write the uploadable file to `<app source root>/autoreg.md`, and after signing keep a signed copy at `<internal workflow>/autoreg.md`. Use EXACTLY this structure (omit a section only if genuinely empty — say why in a one-line note):
 
 ---
 
@@ -468,14 +463,9 @@ Every authentic `autoreg.md` carries a cryptographic signature footer issued by 
 
 Signing is part of this command. Never ask the user for separate signing permission or give them manual signing steps. In normal progress messages, show only the `signature:` field of the final summary. If signing fails, explain the actual failure because an unsigned file cannot be used in the current AutoReg workflow creation dialog.
 
-### Primary path — have the AutoReg extension sign the confirmed workflow file
+### Primary path â€” AutoReg extension
 
-If this workspace is open in a VS Code-family IDE with the AutoReg extension (the one that installed this skill), the extension performs the cloud request. The coding agent must not send either Markdown file to the cloud itself. The extension watches `autoreg.md` and `autoreg.delta.md` inside the open workspace. For a workflow folder outside that workspace, hand its path to the extension through a local request file in the open app workspace.
-
-1. Save the finished `autoreg.md` and, in DELTA mode, the final `autoreg.delta.md` with both hash lines filled in after `.autoreg/delta.json` was written.
-2. If the workflow folder is outside every open IDE workspace folder, write valid JSON to `<open app workspace>/.autoreg-sign-request.json`: `{"workflowFolder":"<absolute confirmed workflow folder>","files":["autoreg.md","autoreg.delta.md"]}` in DELTA mode, or use only `"autoreg.md"` in FULL mode. Escape backslashes in Windows paths, or use forward slashes. The local request contains paths and file names, never document bodies. The extension consumes and removes it, then signs the requested files in the workflow folder. Do not write the request into the external workflow folder: the extension cannot watch it there.
-3. Wait up to 30 seconds, then re-read the END of every requested Markdown file. Each must end with its own `<!-- AUTOREG-SIGNATURE-V1 … -->` block. Do not edit either file again.
-4. If it remains unsigned, remove any leftover request file, report that extension signing did not complete, and point to the **AutoReg Signing** output channel. Do not attempt a direct cloud request from the coding agent in this IDE path, and do not describe the spec as ready to import. Continue to Phase 9 so the baseline is preserved.
+Write the completed `autoreg.md` into the app source root and `autoreg.delta.md` into the hidden workflow on delta runs. The extension watches the source spec and hidden delta report, signs both through the AutoReg cloud, and synchronizes the signed source spec into the hidden workflow. Do not create a signing request file in the app source. Wait for both signatures, then verify that the signed source and hidden copies agree. If signing fails, report the AutoReg Signing output channel and preserve the baseline; an unsigned spec is not ready to import. Never make a direct cloud request from the coding agent while the extension is available.
 
 ### Fallback — sign via Node only outside a VS Code-family IDE
 
@@ -508,7 +498,7 @@ fetch(base+"/v1/spec/sign",{method:"POST",headers:{"Content-Type":"application/j
 .catch(e=>{console.error("SIGNING UNAVAILABLE:",e.message);process.exit(1);});' autoreg.md
 ```
 
-Outside the IDE, DELTA mode runs this once for `autoreg.md` and once with the final argument changed to `autoreg.delta.md`. The file name selects the correct document type. This command works in Bash and PowerShell. Check both footers before claiming success.
+Outside the IDE, sign `<app source root>/autoreg.md` and the hidden workflow `autoreg.delta.md`, then copy the signed source spec into the hidden workflow. The file name selects the correct document type. This command works in Bash and PowerShell. Check both footers before claiming success.
 
 Handling outcomes (either path):
 - **Success** — file now ends with the `AUTOREG-SIGNATURE-V1` footer. Do NOT edit the file after this point; any change invalidates the signature. If you must fix something, edit and re-run this phase.
@@ -531,33 +521,27 @@ Then continue to Phase 9 — the run is not finished until the baseline exists.
 
 The baseline is the memory that makes the next run a delta. Write it every time, in every mode. A run that produces `autoreg.md` but no baseline forces the next run to do a full re-analysis.
 
-Layout, all inside the **project folder** (next to `autoreg.md`):
+Layout:
 
 ```
-<project folder>/
-  autoreg.md                # the complete signed spec — the file AutoReg imports
-  autoreg.delta.md          # delta runs only: human-readable change report
+<app source root>/
+  autoreg.md                 # only visible AutoReg file; signed uploadable spec
+<user home>/.local/.AutoReg/workflows/<source slug>-<source hash>/api/
+  autoreg.md                 # signed copy consumed by desktop AutoReg
+  autoreg.delta.md           # delta runs only; signed report
   .autoreg/
-    baseline.json           # API model + coverage map (schema below)
-    delta.json              # delta runs only: machine contract for the AutoReg app
+    baseline.json
+    delta.json               # delta runs only
     history/
-      baseline.v1.json      # previous versions, newest kept, oldest pruned at 10
-    defects/                # owned by AutoReg (app defects it filed for a coding agent)
-    fixes/                  # owned by the fix-autoreg-defect skill (the coding agent's reports)
+    defects/
+    fixes/
+  plans/
+  tests/
+  runs/
+  <workflow>.ar
 ```
 
-`defects/` and `fixes/` belong to the AutoReg ↔ coding-agent feedback loop. This skill never reads, writes, hashes or prunes them.
-
-Write order: copy the current `baseline.json` to `history/baseline.v<its specVersion>.json`, prune history beyond 10 files, write the new baseline to `baseline.json.tmp`, then rename it over `baseline.json`. The rename is what makes a half-written baseline impossible.
-
-Tell the user once, on the first run that creates it: if the workflow folder is versioned, commit `.autoreg/` so the whole team shares one baseline. The workflow folder is independent of the app's code and is never assumed to be inside its repository. If the folder has no `.gitignore`, offer this one:
-
-```
-# AutoReg workflow — if you version this folder, keep these out
-runs/                    # request/response captures — per-machine
-environments.json        # test-parameter values, including secrets in plain text
-.autoreg/session.json    # per-session MCP discovery (pid, port, token)
-```
+The source tree must not contain any other AutoReg processing files. Write the baseline atomically: archive the previous version to `.autoreg/history/`, write `baseline.json.tmp`, then rename it to `baseline.json`. Never ask the user to commit the hidden workflow. The `defects/` and `fixes/` folders belong to the feedback loop; this skill does not alter them.
 
 ### 9a. `baseline.json` schema (schemaVersion 1)
 
@@ -968,7 +952,7 @@ For an API that already has an `autoreg.md` written by this skill but no baselin
 
 **The rule that matters: do not rewrite scenario bodies.** The whole point is to adopt working coverage untouched. The only permitted edit is assigning TC ids to scenarios that lack them.
 
-1. **Confirm the spec kind.** The existing `autoreg.md` must contain `**Spec type:** api` or an `## API Endpoints` section. If it is a UI spec (it has `## Confirmed UI Selectors`), stop: this folder is a UI workflow — the API spec belongs in a different project folder.
+1. **Confirm the spec kind.** The existing source `autoreg.md` must contain `**Spec type:** api` or an `## API Endpoints` section. If it is a UI spec (it has `## Confirmed UI Selectors`), stop: the API spec belongs in its own API source subfolder and private API workflow.
 2. **Parse the existing `autoreg.md`** (canonical form): scenario blocks with their ids, titles, kinds and steps; the API Endpoints table; Request / Response Models; Error Contracts; Test Data Catalog; Open Questions. From each scenario's steps extract the methods, paths, statuses, quoted values and asserted texts it uses — that is what links it to features.
 3. **Assign missing TC ids** in file order (`TC-001`, `TC-002`, …). This is the one allowed spec edit; re-sign afterwards via Phase 8.
 4. **Light source scan.** Run Phase 2 discovery and the 9b hasher to build `fileIndex`. Do not redo the full Phase 3 extraction where the spec already states the fact — you are adopting it, not auditing it. Infer features by grouping endpoints by resource, map each scenario to features via its routes, derive coverage keys, and extract dependency edges from guards, shared DTOs and flow ordering.

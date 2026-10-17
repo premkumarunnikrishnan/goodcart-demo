@@ -24,27 +24,16 @@ Rules that keep the loop safe:
 3. **Never resolve a defect yourself.** AutoReg verifies by running the scenarios; your report says what you did, its verification decides.
 4. **Secrets stay tokens.** Reproduction steps use `{{tokens}}` (e.g. `{{user_password}}`); values live in AutoReg's environment file. Never ask for them and never write them anywhere.
 5. **Do not commit unless the user asks.** If they do, record the commits in the report.
-6. **The defect path comes from the user.** The workflow folder is separate from the app's code; never search for it or assume it is in this repository.
+6. **Discover the workflow from the app source.** The private workflow path is derived from the current source folder and spec kind. An explicit defect path is optional.
 7. **Behaviour change ⇒ spec regeneration.** If your fix changes anything the spec states (a text, a selector, a route, a flow), run the `generate-autoreg` skill in delta mode before reporting (Phase F6). A report with `behaviourChanged: true` and no regeneration is refused by AutoReg.
 
 ---
 
-## Inputs from $ARGUMENTS — the defect path comes from the user
+## Inputs from $ARGUMENTS
 
-The AutoReg workflow folder is **independent of the application's code**: it is not in this repository and you cannot discover it. When AutoReg files a defect it shows the user the defect's absolute path with a copy button. The user hands that path to you.
+The current workspace is the app source. Do not ask for a workflow folder or app source path. Use the same Windows path algorithm described in `generate-autoreg`: `%USERPROFILE%/.local/.AutoReg/workflows/<slug>-<hash>/<ui|api>`, where the identity root is the directory containing the uploadable `autoreg.md`. Inspect the current root and any `ui/autoreg.md` and `api/autoreg.md` subfolders to find matching hidden workflows. Select open defects from those workflows' `.autoreg/defects/` folders. If several open defects exist, show their IDs and titles and ask which one to fix. If no defect exists, say so. An explicit defect path or `DEF-nnnn` argument selects that defect directly and must be verified to belong to the current app.
 
-Parse `$ARGUMENTS` as space-separated tokens:
-- Tokens starting with `--`: flags. `--list` prints the open defects of the workflow and stops. `--no-spec` skips the spec regeneration in Phase F6 even when behaviour changed (the report then says the spec must be regenerated before verification).
-- Token 1 (path), one of:
-  - the **defect file** — `…/<workflow>/.autoreg/defects/DEF-0003.json` (what the user copies from AutoReg). The workflow folder is three levels up; the defect id is the file name.
-  - the **workflow folder** — `…/<workflow>` (the one containing the `.ar` manifest and `.autoreg/`), followed by an optional token 2 `DEF-nnnn`. Omit the id to be shown the open defects.
-- Token 3+ (optional paths): app source roots. Omit to read them from the defect (`spec.sourceRoots`) or `.autoreg/baseline.json` (`app.sourceRoots[].path`).
-
-**If no path was given, ask for it before doing anything else** — one question, then stop and wait:
-
-> Paste the path of the defect AutoReg filed (the "Defect" line in Reggie's reply has a copy button — it looks like `C:/…/my-workflow/.autoreg/defects/DEF-0003.json`).
-
-Do not guess, search the file system, or use the current working directory: the workflow is not here. Accept a path with either slash style and with or without surrounding quotes. If the path does not exist or is not a `DEF-nnnn.json` file or a folder containing `.autoreg/defects/`, say what is wrong and ask again.
+Flags: `--list` prints open defects and stops; `--no-spec` skips regeneration when behaviour changes, leaving the report pending. Resolve analysis source roots from the defect's `spec.sourceRoots` or hidden baseline; never ask for their paths when recorded and still present.
 
 ---
 
@@ -145,7 +134,7 @@ Exactly one of:
 Ask yourself: does the fix change anything the spec states — a user-visible text, a selector, a route, the order of a flow, a validation rule? Compare against `spec.scenarioBlock` and `spec.feature`.
 
 - **No** (you restored the specified behaviour) → `behaviourChanged: false`.
-- **Yes, or unsure** → run the `generate-autoreg` skill in delta mode on this project with **both roles explicit**: `/generate-autoreg "<workflow folder>" "<app source root>" ["<additional source root>" ...] --delta`. Use the workflow already resolved in Phase F0 and every app source root resolved in Phase F0 from the defect or baseline. If a root is missing or has moved, ask for its correct path before invoking the generator. It updates `autoreg.md`, `.autoreg/baseline.json` and `.autoreg/delta.json`, and prints a summary line with the new spec version. Then `behaviourChanged: true` and `specRegenerated: { "mode": "delta", "toSpecVersion": <N> }`. Tell the user you did this and why.
+- **Yes, or unsure** â†’ run `/generate-autoreg --delta` from the app source root already resolved in Phase F0. The generator derives the same hidden workflow, updates the visible `autoreg.md` and private baseline/delta, and signs the spec and report. Then set `behaviourChanged: true` and `specRegenerated: { "mode": "delta", "toSpecVersion": <N> }`.
 - **`--no-spec` was given** → `behaviourChanged: true`, `specRegenerated: null`, and say in `notes` that the spec must be regenerated before AutoReg can verify.
 
 ---
