@@ -5,7 +5,6 @@ const crypto = require('node:crypto');
 
 const root = __dirname;
 const ordersFile = process.env.GOODCART_ORDERS_FILE || path.join(root, 'data', 'orders.json');
-const reviewsFile = process.env.GOODCART_REVIEWS_FILE || path.join(root, 'data', 'reviews.json');
 const port = Number(process.env.PORT || 3000);
 const catalog = new Map([
   [1, ['Everyday Ceramic Mug', 24]], [2, ['Cloud Soft Throw', 49]],
@@ -26,7 +25,6 @@ const staticFiles = new Map([
   ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']]
 ]);
 let writeQueue = Promise.resolve();
-let reviewWriteQueue = Promise.resolve();
 
 function send(res, status, value) {
   const body = JSON.stringify(value);
@@ -36,33 +34,6 @@ function send(res, status, value) {
 async function readOrders() {
   try { return JSON.parse(await fs.readFile(ordersFile, 'utf8')).map(order => ({...order, status:order.status === 'New' ? 'Processing' : order.status})); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-}
-async function readReviews() {
-  try { return JSON.parse(await fs.readFile(reviewsFile, 'utf8')); }
-  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-}
-function createReview(input) {
-  const productId = input?.productId;
-  const rating = input?.rating;
-  const name = typeof input?.name === 'string' ? input.name.trim() : '';
-  const comment = typeof input?.comment === 'string' ? input.comment.trim() : '';
-  if (!catalog.has(productId)) throw new Error('Please choose a valid product.');
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new Error('Please choose a rating from 1 to 5 stars.');
-  if (name.length < 2 || name.length > 60) throw new Error('Please enter a name between 2 and 60 characters.');
-  if (!comment || comment.length > 1000) throw new Error('Please write a review of up to 1000 characters.');
-  return {id:'RV-' + crypto.randomBytes(8).toString('hex').toUpperCase(), productId, rating, name, comment, createdAt:new Date().toISOString()};
-}
-function saveReview(review) {
-  const task = reviewWriteQueue.then(async () => {
-    const reviews = await readReviews();
-    reviews.unshift(review);
-    await fs.mkdir(path.dirname(reviewsFile), {recursive:true});
-    const temporary = reviewsFile + '.tmp';
-    await fs.writeFile(temporary, JSON.stringify(reviews, null, 2));
-    await fs.rename(temporary, reviewsFile);
-  });
-  reviewWriteQueue = task.catch(() => {});
-  return task;
 }
 function publicOrder(order) {
   const {cleanupToken, cleanupTokenHash, ...visible} = order;
@@ -125,12 +96,6 @@ function createOrder(input) {
 const server = http.createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, 'http://localhost').pathname;
-    if (pathname === '/api/reviews' && req.method === 'GET') return send(res, 200, await readReviews());
-    if (pathname === '/api/reviews' && req.method === 'POST') {
-      const review = createReview(await bodyJson(req));
-      await saveReview(review);
-      return send(res, 201, review);
-    }
     if (pathname === '/api/orders' && req.method === 'GET') return send(res, 200, (await readOrders()).map(publicOrder));
     if (pathname === '/api/orders' && req.method === 'POST') {
       const order = createOrder(await bodyJson(req));
@@ -182,4 +147,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 if (require.main === module) server.listen(port, '127.0.0.1', () => console.log(`GoodCart running at http://127.0.0.1:${port}`));
-module.exports = {server,createOrder,publicOrder,canCleanupOrder,createReview};
+module.exports = {server,createOrder,publicOrder,canCleanupOrder};
