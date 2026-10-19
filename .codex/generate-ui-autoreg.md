@@ -2,6 +2,12 @@ Generate a complete, production-grade `autoreg.md` specification for **UI / end-
 
 This skill is normally dispatched by the `generate-autoreg` router (which decides whether a project is a UI, an API or both); it can also be run directly. Its sibling `generate-api-autoreg` produces the API-testing spec — never mix the two into one file.
 
+Keep internal storage and verification details out of user-facing messages. If signing or generation fails, explain why the source `autoreg.md` is not ready without exposing workflow paths.
+
+**Successful final response contract (FULL, DELTA, and BOOTSTRAP):** if run directly, the entire final reply is exactly `autoreg.md is ready to upload.` If dispatched by `generate-autoreg`, let the router send its single final reply. Do not add environment warnings, test/validation summaries, open questions, or other closing notes. Put unresolved application setup questions in the source `autoreg.md` under `## Open Questions`. A missing environment value is a question, not proof of a live failure unless a test actually observed it.
+
+Skill version: 1.0.2
+
 Every fact in the file must come from live source code read during THIS run — never copy analysis forward from an existing `autoreg.md` on trust. What DOES carry forward, in every mode, is user input: values in `## Test Data Catalog` marked `Source: user` and answered `## Open Questions` are the user's, not stale analysis. Never re-ask what they already answered.
 
 ---
@@ -12,14 +18,14 @@ This skill runs in one of three modes. Pick one by looking at what is already on
 
 | On disk | Flag given | Mode | What to run |
 |---|---|---|---|
-| No `autoreg.md`, no `.autoreg/baseline.json` | any | **FULL** | Phases 0–8 (this is the original behaviour) |
-| `autoreg.md` exists, but NO `.autoreg/baseline.json` | none | **BOOTSTRAP** → then DELTA | Phase B (adopt the existing spec), then D0–D10 |
+| No `autoreg.md`, no `baseline.json` | any | **FULL** | Phases 0–8 (this is the original behaviour) |
+| `autoreg.md` exists, but NO `baseline.json` | none | **BOOTSTRAP** → then DELTA | Phase B (adopt the existing spec), then D0–D10 |
 | Both exist, baseline valid | none or `--delta` | **DELTA** | Phases D0–D10 |
 | Both exist | `--full` | **FULL** | Phases 0–8, but preserve scenario IDs by coverage key (see Phase 5.5) |
-| Baseline corrupt, unreadable, or `schemaVersion` newer than 1 | any | **FULL** | Say why in one line. Salvage `dataCatalog` + `openQuestions` from it first if the JSON parses at all |
-| DELTA finds more than 60% of features impacted | — | **recommend FULL** | Ask the user; non-interactively just run FULL and say so in the summary |
+| Baseline corrupt, unreadable, or `schemaVersion` newer than 1 | any | **FULL** | Salvage `dataCatalog` + `openQuestions` from it first if the JSON parses at all; report a blocking issue only if generation cannot continue |
+| DELTA finds more than 60% of features impacted | — | **recommend FULL** | Ask the user; non-interactively run FULL. The completion message still names only `autoreg.md`. |
 
-Announce the chosen mode in one line before you start work, e.g. `Mode: delta (baseline v2 → v3)`.
+Choose the mode internally; do not announce the mode or baseline version to the user.
 
 **Never** regenerate every scenario when the baseline is usable. Rewriting scenarios that nothing in the app touched is how stable, working tests get silently broken.
 
@@ -27,9 +33,9 @@ Announce the chosen mode in one line before you start work, e.g. `Mode: delta (b
 
 ## Inputs from $ARGUMENTS
 
-For the mode table above, check `<app source root>/autoreg.md` for the spec and `<internal workflow>/.autoreg/baseline.json` for the baseline. A baseline with an unsupported newer schema must stop generation until the skill is updated; do not replace it with a full run.
+For the mode table above, check `<workflow>/autoreg.md` for the spec and `<workflow>/baseline.json` for the baseline. A baseline with an unsupported newer schema must stop generation until the skill is updated; do not replace it with a full run.
 
-The app source is the current workspace root. Never ask for a workflow folder or app source path when invoked without paths. The router passes the derived internal workflow path first and the app source root second. When invoked directly, derive the internal workflow using the shared algorithm in `generate-autoreg` for kind `ui`. Treat explicit extra paths as additional source roots. The directory containing the uploadable `autoreg.md` is the identity root used by the desktop app and extension. Keep all generated artifacts other than that source `autoreg.md` inside the hidden workflow. Read the source `autoreg.md` as authoritative and keep a signed copy in the hidden workflow for desktop processing.
+The app source is the current workspace root. Never ask for a workflow folder or app source path when invoked without paths. The router passes the derived internal workflow path first and the app source root second. When invoked directly, derive the internal workflow using the shared algorithm in `generate-autoreg` for kind `ui`. Treat explicit extra paths as additional source roots. Use the app source root as the identity root. Write one uploadable `autoreg.md` in the existing `.autoreg/<ui|api>` workflow folder, beside every generated artifact. Never create a nested `.autoreg` folder or a second spec copy.
 
 ---
 
@@ -58,13 +64,13 @@ Search the project folder for a file ending in `.ar` (e.g. `myapp.ar`). Read it 
 - `sources[0].autoregMd` — relative path where `autoreg.md` lives (default: `"autoreg.md"`)
 - `metadata.name` — project name
 
-If no `.ar` file exists yet, use the app source folder name as the project name and `<app source root>/autoreg.md` as the output path. The desktop app creates the manifest under the hidden workflow when that signed spec is imported.
+If no `.ar` file exists yet, use the app source folder name as the project name and `<workflow>/autoreg.md` as the output path. The desktop app creates the manifest under the workflow when that signed spec is imported.
 
 ---
 
 ## Phase 2 — Detect the tech stack, then discover source files
 
-First read `package.json` / `composer.json` / `Gemfile` / `requirements.txt` / `pyproject.toml` / `pom.xml` / `build.gradle` / `*.csproj` / `go.mod` to identify the framework. Then scan the matching file set (search recursively; skip `node_modules/`, `vendor/`, `dist/`, `build/`, `out/`, `.next/`, `.nuxt/`, `.svelte-kit/`, `.output/`, `target/`, `bin/`, `obj/`, `coverage/`, `__pycache__/`, `.git/`):
+First read `package.json` / `composer.json` / `Gemfile` / `requirements.txt` / `pyproject.toml` / `pom.xml` / `build.gradle` / `*.csproj` / `go.mod` to identify the framework. Then scan the matching file set (search recursively; skip `node_modules/`, `vendor/`, `dist/`, `build/`, `out/`, `.next/`, `.nuxt/`, `.svelte-kit/`, `.output/`, `target/`, `bin/`, `obj/`, `coverage/`, `__pycache__/`, `.autoreg/`, `.git/`):
 
 | Stack | UI / template files | Route sources |
 |-------|--------------------|---------------|
@@ -246,7 +252,7 @@ TC ids come from `nextScenarioId` and only ever increase. **Never reuse the id o
 
 ## Phase 6 — Write `autoreg.md`
 
-Write the uploadable file to `<app source root>/autoreg.md`, and after signing keep a signed copy at `<internal workflow>/autoreg.md`. Use EXACTLY this structure (omit a section only if genuinely empty — say why in a one-line note):
+Write the single uploadable file to `<workflow>/autoreg.md`. Use EXACTLY this structure (omit a section only if genuinely empty — say why in a one-line note):
 
 ---
 
@@ -496,15 +502,15 @@ Run this checklist against the file you just wrote. Fix violations, then re-chec
 
 ## Phase 8 — Sign and seal (mandatory, LAST step that touches `autoreg.md`)
 
-Every authentic `autoreg.md` carries a cryptographic signature footer issued by the AutoReg cloud. In DELTA mode, `autoreg.delta.md` must carry its own signature too. The signed report records hashes of both the complete spec and `.autoreg/delta.json`; AutoReg checks all three before it uses the machine delta. Do not edit either Markdown file after signing.
+Every authentic `autoreg.md` carries a cryptographic signature footer issued by the AutoReg cloud. In DELTA mode, `autoreg.delta.md` must carry its own signature too. The signed report records hashes of both the complete spec and `delta.json`; AutoReg checks all three before it uses the machine delta. Do not edit either Markdown file after signing.
 
-(Phase 9 runs after this one, but it only writes `.autoreg/` — it never touches the signed spec.)
+(Phase 9 runs after this one, but it only writes workflow metadata and never touches the signed spec.)
 
-Signing is part of this command. Never ask the user for separate signing permission or give them manual signing steps. In normal progress messages, show only the `signature:` field of the final summary. If signing fails, explain the actual failure because an unsigned file cannot be used in the current AutoReg workflow creation dialog.
+Signing is part of this command. Never ask the user for separate signing permission or give them manual signing steps. Keep signing and verification details internal on success. If signing fails, explain the actual failure because an unsigned file cannot be used in the current AutoReg workflow creation dialog.
 
 ### Primary path â€” AutoReg extension
 
-Write the completed `autoreg.md` into the app source root and `autoreg.delta.md` into the hidden workflow on delta runs. The extension watches the source spec and hidden delta report, signs both through the AutoReg cloud, and synchronizes the signed source spec into the hidden workflow. Do not create a signing request file in the app source. Wait for both signatures, then verify that the signed source and hidden copies agree. If signing fails, report the AutoReg Signing output channel and preserve the baseline; an unsigned spec is not ready to import. Never make a direct cloud request from the coding agent while the extension is available.
+Write `autoreg.md` and, on delta runs, `autoreg.delta.md` directly in the workflow folder. The extension watches and signs both through the AutoReg cloud. Wait for both signatures, then verify the signed files in that folder. If signing fails, report the AutoReg Signing output channel and preserve the baseline; an unsigned spec is not ready to import. Never make a direct cloud request from the coding agent while the extension is available.
 
 ### Fallback — sign via Node only outside a VS Code-family IDE
 
@@ -533,11 +539,11 @@ const base=(process.env.AUTOREG_CLOUD_URL||"https://autoreg-cloud-chat.autoregbo
 const canonical=fs.readFileSync(p,"utf-8").replace(/\n*<!--[ \t]*AUTOREG-SIGNATURE-V1[\s\S]*?-->[\s\n]*$/,"").replace(/\r\n/g,"\n").replace(/\r/g,"\n").trimEnd()+"\n";
 fetch(base+"/v1/spec/sign",{method:"POST",headers:{"Content-Type":"application/json","User-Agent":"AutoReg-SpecSigner/1.0"},body:JSON.stringify({content:canonical,documentType:path.basename(p)==="autoreg.delta.md"?"delta-report":"spec"})})
 .then(async r=>{if(!r.ok){console.error(`SIGNING FAILED (${r.status}): ${await r.text()}`);process.exit(r.status===422?2:1);}return r.json();})
-.then(s=>{fs.writeFileSync(p,canonical+`\n<!-- AUTOREG-SIGNATURE-V1\nalg: ${s.alg}\nkeyId: ${s.keyId}\nhash: ${s.hash}\nissuedAt: ${s.issuedAt}\nsignature: ${s.signature}\n-->\n`);console.log(`signed: ${s.hash} (key ${s.keyId})`);})
-.catch(e=>{console.error("SIGNING UNAVAILABLE:",e.message);process.exit(1);});' autoreg.md
+.then(s=>{fs.writeFileSync(p,canonical+`\n<!-- AUTOREG-SIGNATURE-V1\nalg: ${s.alg}\nkeyId: ${s.keyId}\nhash: ${s.hash}\nissuedAt: ${s.issuedAt}\nsignature: ${s.signature}\n-->\n`);})
+.catch(e=>{console.error("SIGNING UNAVAILABLE:",e.message);process.exit(1);});' "<workflow>/autoreg.md"
 ```
 
-Outside the IDE, sign `<app source root>/autoreg.md` and the hidden workflow `autoreg.delta.md`, then copy the signed source spec into the hidden workflow. The file name selects the correct document type. This command works in Bash and PowerShell. Check both footers before claiming success.
+Outside the IDE, sign the workflow `autoreg.md` and `autoreg.delta.md` in place. The file name selects the correct document type. This command works in Bash and PowerShell. Check both footers before claiming success.
 
 Handling outcomes (either path):
 - **Success** — file now ends with the `AUTOREG-SIGNATURE-V1` footer. Do NOT edit the file after this point; any change invalidates the signature. If you must fix something, edit and re-run this phase.
@@ -545,14 +551,7 @@ Handling outcomes (either path):
 - **HTTP 403 with "error code: 1010"** — the request was blocked at the network edge for missing/blocked User-Agent. Ensure the `User-Agent: AutoReg-SpecSigner/1.0` header is present exactly as shown.
 - **Network failure, endpoint unavailable, or an automatic approval review blocks the request** — leave the file UNSIGNED and report that signing could not complete. An unsigned spec cannot be used in the current AutoReg workflow creation dialog. NEVER construct a signature footer yourself — a fabricated signature causes the import to be rejected as tampered. Do not ask the user for a separate signing permission prompt; if the execution environment blocks this external request, state that limitation plainly.
 
-Then print a one-line summary:
-```
-autoreg.md (ui) written: [N] pages, [N] selectors, [N] types, [N] data entries, [N] scenarios ([N] positive, [N] negative), [N] open questions, signature: [signed <keyId> | UNSIGNED]
-baseline: .autoreg/baseline.json v[N] ([N] features, [N] dependency edges) — re-run this skill after changing your app and only the differences get regenerated
-```
-If there are open questions, list them right after the summary and ask the user to answer them now.
-
-Then continue to Phase 9 — the run is not finished until the baseline exists.
+Continue to Phase 9 without printing a completion message. The run is not finished until the baseline exists. Ask any necessary open questions before completion; the successful completion message names only the source `autoreg.md` file.
 
 ---
 
@@ -563,24 +562,21 @@ The baseline is the memory that makes the next run a delta. Write it every time,
 Layout:
 
 ```
-<app source root>/
-  autoreg.md                 # only visible AutoReg file; signed uploadable spec
-<user home>/.local/.AutoReg/workflows/<source slug>-<source hash>/ui/
-  autoreg.md                 # signed copy consumed by desktop AutoReg
+<app source root>/.autoreg/ui/
+  autoreg.md                 # the single signed uploadable spec
   autoreg.delta.md           # delta runs only; signed report
-  .autoreg/
-    baseline.json
-    delta.json               # delta runs only
-    history/
-    defects/
-    fixes/
+  baseline.json
+  delta.json               # delta runs only
+  history/
+  defects/
+  fixes/
   plans/
   tests/
   runs/
   <workflow>.ar
 ```
 
-The source tree must not contain any other AutoReg processing files. Write the baseline atomically: archive the previous version to `.autoreg/history/`, write `baseline.json.tmp`, then rename it to `baseline.json`. Never ask the user to commit the hidden workflow. The `defects/` and `fixes/` folders belong to the feedback loop; this skill does not alter them.
+Keep all workflow processing files under the source tree's `.autoreg/<ui|api>/` folder. Write the baseline atomically: archive the previous version to `history/`, write `baseline.json.tmp`, then rename it to `baseline.json`. Do not commit the workflow unless the user asks. The `defects/` and `fixes/` folders belong to the feedback loop; this skill does not alter them.
 
 ### 9a. `baseline.json` schema (schemaVersion 1)
 
@@ -736,7 +732,7 @@ baseline (last analysis)  +  current source
 
 ## D0 — Load the baseline and reconcile
 
-1. Read `.autoreg/baseline.json`. If `schemaVersion` > 1, stop and tell the user to update the AutoReg extension — do NOT silently full-regenerate over a newer schema, it would discard information you cannot read.
+1. Read `baseline.json`. If `schemaVersion` > 1, stop and tell the user to update the AutoReg extension — do NOT silently full-regenerate over a newer schema, it would discard information you cannot read.
 2. Read `autoreg.md`, canonicalise it (9b), hash it, compare to `specHash`.
    - Match → proceed.
    - **Mismatch** → someone hand-edited the spec since the last run. The SPEC wins for scenario bodies: re-parse its scenario blocks, recompute each `bodyHash`, update your in-memory baseline, and tell the user which scenarios diverged. Never silently discard a hand edit.
@@ -755,7 +751,7 @@ Hashes are ground truth. Git is an accelerator that also detects renames — it 
    - If it is unreachable (rebase, force-push, shallow clone): try `git merge-base <baseSHA> HEAD`. If that fails too, use the hash pass alone and say so.
 3. **Merge.** Hashes decide membership; git contributes rename pairs. A rename whose canonical hash is unchanged is a **pure move**: update the paths in `fileIndex` and in the feature's `files`, and do NOT mark the feature impacted. A rename with a changed hash is a modification.
 
-If the ChangeSet is empty: report `No functional changes since spec v<N> — nothing to do`, write nothing, do not bump the version, do not re-sign. Stop.
+If the ChangeSet is empty: report `autoreg.md is up to date and ready to upload`, write nothing, do not bump the version, do not re-sign. Stop.
 
 ## D2 — Scope the re-analysis
 
@@ -796,7 +792,7 @@ New features get a new permanent `id` (check it against every id ever used, incl
    - seed/fixture → features owning Known Element Counts or search-term assertions
    - shared UI component → features whose `selectors` intersect that component's
 
-If more than 60% of active features end up impacted, this is not a delta. Say so and recommend `--full`; non-interactively, run FULL and note it in the summary.
+If more than 60% of active features end up impacted, this is not a delta. Ask whether to run `--full`; non-interactively, run FULL. Keep the completion message limited to the source `autoreg.md` file.
 
 ## D5 — Classify every scenario (the Testing Delta)
 
@@ -857,7 +853,7 @@ Only new and changed material, with references rather than copies for everything
 **Base:** spec v2 (2026-08-14, commit `abc1234`) → **Target:** commit `def5678` (2026-09-09)
 **Complete spec:** `autoreg.md` — import that, not this file.
 **Complete spec SHA-256:** `sha256:<canonical autoreg.md hash>`
-**Machine delta SHA-256:** `sha256:<hash of exact .autoreg/delta.json bytes>`
+**Machine delta SHA-256:** `sha256:<hash of exact delta.json bytes>`
 
 ## Change Summary
 - Features: 1 added (wishlist) · 1 modified (auth-login) · 1 removed (guest-checkout)
@@ -896,7 +892,7 @@ Only new and changed material, with references rather than copies for everything
 | TC-001 | Login with valid credentials | auth-login |
 ```
 
-### `.autoreg/delta.json` — the machine contract
+### `delta.json` — the machine contract
 
 The AutoReg app reads THIS, not the markdown report — it drives deletions, and parsing prose to decide what to delete is not acceptable. Write it in the same run:
 
@@ -946,7 +942,7 @@ Mapping D5 classifications to operations — there are only four `op` values:
 
 Only claim a mechanical aspect when the substitution is genuinely exact and complete. The app verifies that each substitution actually matched something; one that matches nothing is reported as drift, not applied.
 
-After writing the final `.autoreg/delta.json`, compute its SHA-256 over the exact UTF-8 file bytes. Compute the complete spec hash with Phase 8's canonicalization (signature removed, LF line endings, one trailing newline). Put both lowercase `sha256:<64 hex>` values in the report above. Do this before D9 verification and before signing; do not rewrite the JSON or either Markdown file after signing.
+After writing the final `delta.json`, compute its SHA-256 over the exact UTF-8 file bytes. Compute the complete spec hash with Phase 8's canonicalization (signature removed, LF line endings, one trailing newline). Put both lowercase `sha256:<64 hex>` values in the report above. Do this before D9 verification and before signing; do not rewrite the JSON or either Markdown file after signing.
 
 ## D9 — Delta self-verification (mandatory)
 
@@ -957,7 +953,7 @@ Run the whole Phase 7 checklist against the merged `autoreg.md`, then these:
 3. Every selector, route and exact text used by NEW and UPDATED scenarios was confirmed against current source **in this run** — cite the file.
 4. No active scenario references anything the Functional Diff removed.
 5. No deprecated scenario remains in `## Test Scenarios`.
-6. `autoreg.delta.md`, `.autoreg/delta.json` and `autoreg.md` agree: every operation in the JSON matches the report, every non-`unchanged` operation corresponds to a real change in the spec, and every `unchanged` reference names a real active TC id. The report's two SHA-256 lines match the final spec and the exact machine JSON bytes.
+6. `autoreg.delta.md`, `delta.json` and `autoreg.md` agree: every operation in the JSON matches the report, every non-`unchanged` operation corresponds to a real change in the spec, and every `unchanged` reference names a real active TC id. The report's two SHA-256 lines match the final spec and the exact machine JSON bytes.
 7. Every `patch.substitutions` entry quotes text that actually appears in the previous version of that scenario.
 8. `fileIndex` covers every file read this run with a current hash, and every active feature's files exist on disk.
 9. The Change Log row for this version matches what you actually did.
@@ -966,13 +962,7 @@ Run the whole Phase 7 checklist against the merged `autoreg.md`, then these:
 
 Run **Phase 8** (signing) on both `autoreg.md` and `autoreg.delta.md`, then **Phase 9** (baseline). Compute `delta.json`'s `specHash` from the same canonical spec content — it is signature-invariant, so it holds before and after signing. Do not tell the user to apply the delta unless both signatures succeeded.
 
-Print the summary:
-
-```
-autoreg.md updated (delta v3): +2 scenarios (TC-013, TC-014), ~1 updated (TC-002), -1 deprecated (TC-007), 10 unchanged; 1 feature added, 1 modified; 2 open questions; signature: signed <keyId>
-delta report: autoreg.delta.md · machine delta: .autoreg/delta.json
-Apply it in AutoReg: ask the agent to "apply the spec delta" — it previews the changes before touching any test.
-```
+After the checks finish, report only `autoreg.md` in the app source folder as updated and ready to upload. Do not mention delta files, baseline files, workflow paths, signatures, or hashes.
 
 ---
 
@@ -1031,3 +1021,7 @@ For an app that already has an `autoreg.md` from before delta mode existed: adop
 10. **Determinism** — no assertions on timing, animation, or counts of live/dynamic data. If a count is not backed by seed data, assert "at least 1" semantics via visibility instead.
 
 11. **Signature footer is sacred** — the `<!-- AUTOREG-SIGNATURE-V1 … -->` block must be the last thing in the file, added only by Phase 8's signing endpoint. Never write, copy, or modify one by hand, and never edit the file after signing (re-sign instead).
+
+## Final reply
+
+On success, reply only `autoreg.md is ready to upload.` when run directly. When dispatched by `generate-autoreg`, let the router send its single final reply. Put any unresolved environment item in the source `autoreg.md` and do not add it after the final reply.

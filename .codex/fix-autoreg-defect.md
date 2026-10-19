@@ -6,10 +6,10 @@ Skill version: 1.0.0
 
 ## The contract — read this first
 
-Everything lives in the AutoReg **project folder** (the one with the `.ar` manifest, `autoreg.md`, `tests/` and `.autoreg/`):
+Everything lives in the AutoReg **project folder** (the single `.autoreg/ui` or `.autoreg/api` folder with the `.ar` manifest, `autoreg.md` and `tests/`):
 
 ```
-<project folder>/.autoreg/
+<project folder>/
   defects/DEF-0003.json        # written by AutoReg — you READ this, never edit it
   defects/DEF-0003/            # evidence: failing-step.png, live-snapshot.txt, diagnostics.json
   defects/index.json           # summary of every defect and its status
@@ -24,16 +24,16 @@ Rules that keep the loop safe:
 3. **Never resolve a defect yourself.** AutoReg verifies by running the scenarios; your report says what you did, its verification decides.
 4. **Secrets stay tokens.** Reproduction steps use `{{tokens}}` (e.g. `{{user_password}}`); values live in AutoReg's environment file. Never ask for them and never write them anywhere.
 5. **Do not commit unless the user asks.** If they do, record the commits in the report.
-6. **Discover the workflow from the app source.** The private workflow path is derived from the current source folder and spec kind. An explicit defect path is optional.
+6. **Discover the workflow from the app source.** The workflow path is derived from the current source folder and spec kind. An explicit defect path is optional.
 7. **Behaviour change ⇒ spec regeneration.** If your fix changes anything the spec states (a text, a selector, a route, a flow), run the `generate-autoreg` skill in delta mode before reporting (Phase F6). A report with `behaviourChanged: true` and no regeneration is refused by AutoReg.
 
 ---
 
 ## Inputs from $ARGUMENTS
 
-The current workspace is the app source. Do not ask for a workflow folder or app source path. Use the same Windows path algorithm described in `generate-autoreg`: `%USERPROFILE%/.local/.AutoReg/workflows/<slug>-<hash>/<ui|api>`, where the identity root is the directory containing the uploadable `autoreg.md`. Inspect the current root and any `ui/autoreg.md` and `api/autoreg.md` subfolders to find matching hidden workflows. Select open defects from those workflows' `.autoreg/defects/` folders. If several open defects exist, show their IDs and titles and ask which one to fix. If no defect exists, say so. An explicit defect path or `DEF-nnnn` argument selects that defect directly and must be verified to belong to the current app.
+The current workspace is the app source. Do not ask for a workflow folder or app source path. Use the same path rule described in `generate-autoreg`: `<source root>/.autoreg/<ui|api>`, where the identity root is the app source root. Inspect the existing `.autoreg/ui/autoreg.md` and `.autoreg/api/autoreg.md` to find matching workflows. Select open defects from those workflows' `defects/` folders. If several open defects exist, show their IDs and titles and ask which one to fix. If no defect exists, say so. An explicit defect path or `DEF-nnnn` argument selects that defect directly and must be verified to belong to the current app.
 
-Flags: `--list` prints open defects and stops; `--no-spec` skips regeneration when behaviour changes, leaving the report pending. Resolve analysis source roots from the defect's `spec.sourceRoots` or hidden baseline; never ask for their paths when recorded and still present.
+Flags: `--list` prints open defects and stops; `--no-spec` skips regeneration when behaviour changes, leaving the report pending. Resolve analysis source roots from the defect's `spec.sourceRoots` or workflow baseline; never ask for their paths when recorded and still present.
 
 ---
 
@@ -44,8 +44,8 @@ List the defects that are waiting for a coding agent. Run this from the project 
 ```bash
 node -e '
 const fs=require("fs"),path=require("path");
-const dir=path.join(process.argv[1],".autoreg","defects");
-const fixes=path.join(process.argv[1],".autoreg","fixes");
+const dir=path.join(process.argv[1],"defects");
+const fixes=path.join(process.argv[1],"fixes");
 for(const f of fs.readdirSync(dir).filter(f=>/^DEF-\d+\.json$/.test(f)).sort()){
   const d=JSON.parse(fs.readFileSync(path.join(dir,f),"utf8"));
   let fix=null;try{fix=JSON.parse(fs.readFileSync(path.join(fixes,d.id+".fix.json"),"utf8"))}catch{}
@@ -70,8 +70,8 @@ Write the claim BEFORE analysing anything — it tells AutoReg (and other agents
 node -e '
 const fs=require("fs"),path=require("path");
 const [proj,id,agent]=process.argv.slice(1);
-const d=JSON.parse(fs.readFileSync(path.join(proj,".autoreg","defects",id+".json"),"utf8"));
-const dir=path.join(proj,".autoreg","fixes");fs.mkdirSync(dir,{recursive:true});
+const d=JSON.parse(fs.readFileSync(path.join(proj,"defects",id+".json"),"utf8"));
+const dir=path.join(proj,"fixes");fs.mkdirSync(dir,{recursive:true});
 const report={schemaVersion:1,defectId:id,defectRevision:d.revision,agent:{name:agent,skillVersion:"1.0.0"},claimedAt:new Date().toISOString(),status:"in-progress"};
 const p=path.join(dir,id+".fix.json");fs.writeFileSync(p+".tmp",JSON.stringify(report,null,2));fs.renameSync(p+".tmp",p);
 console.log("claimed",id,"at revision",d.revision);
@@ -124,7 +124,7 @@ Exactly one of:
 
 - Make the smallest change that makes the app meet the spec's expectation. Prefer fixing the cause over patching the symptom.
 - Run the app's own unit tests, type checks and linters if the project has them.
-- Do not edit `tests/*.json`, `autoreg.md`, `.autoreg/defects/*`, `baseline.json` or `delta.json`.
+- Do not edit `tests/*.json`, `autoreg.md`, `defects/*`, `baseline.json` or `delta.json`.
 - Keep a list of every file you changed with a one-line summary each — it goes in the report.
 
 ---
@@ -134,7 +134,7 @@ Exactly one of:
 Ask yourself: does the fix change anything the spec states — a user-visible text, a selector, a route, the order of a flow, a validation rule? Compare against `spec.scenarioBlock` and `spec.feature`.
 
 - **No** (you restored the specified behaviour) → `behaviourChanged: false`.
-- **Yes, or unsure** â†’ run `/generate-autoreg --delta` from the app source root already resolved in Phase F0. The generator derives the same hidden workflow, updates the visible `autoreg.md` and private baseline/delta, and signs the spec and report. Then set `behaviourChanged: true` and `specRegenerated: { "mode": "delta", "toSpecVersion": <N> }`.
+- **Yes, or unsure** â†’ run `/generate-autoreg --delta` from the app source root already resolved in Phase F0. The generator derives the same workflow, updates the visible `autoreg.md` and workflow baseline/delta, and signs the spec and report. Then set `behaviourChanged: true` and `specRegenerated: { "mode": "delta", "toSpecVersion": <N> }`.
 - **`--no-spec` was given** → `behaviourChanged: true`, `specRegenerated: null`, and say in `notes` that the spec must be regenerated before AutoReg can verify.
 
 ---
@@ -179,8 +179,8 @@ Validate it before finishing — AutoReg rejects reports that do not satisfy the
 node -e '
 const fs=require("fs"),path=require("path");
 const [proj,id]=process.argv.slice(1);
-const r=JSON.parse(fs.readFileSync(path.join(proj,".autoreg","fixes",id+".fix.json"),"utf8"));
-const d=JSON.parse(fs.readFileSync(path.join(proj,".autoreg","defects",id+".json"),"utf8"));
+const r=JSON.parse(fs.readFileSync(path.join(proj,"fixes",id+".fix.json"),"utf8"));
+const d=JSON.parse(fs.readFileSync(path.join(proj,"defects",id+".json"),"utf8"));
 const errs=[];
 if(r.schemaVersion!==1)errs.push("schemaVersion must be 1");
 if(r.defectId!==id)errs.push("defectId mismatch");
