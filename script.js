@@ -24,6 +24,7 @@ let sort = 'featured';
 let activeModal = null;
 let previousFocus = null;
 let toastTimer;
+let currentDetailId = null;
 
 function saveCart(){localStorage.setItem(storageKey,JSON.stringify(cart));updateCartCount();renderCart();}
 function cartEntries(){return Object.entries(cart).map(([id,qty])=>({product:products.find(p=>p.id===Number(id)),qty})).filter(x=>x.product&&x.qty>0);}
@@ -39,7 +40,51 @@ function switchLayer(name){closeLayer();openLayer(name);}
 function renderFilters(){const categories=['All products','Home','Lifestyle','Tech','Office'];$('filters').innerHTML=categories.map(c=>`<button class="filter ${c===category?'active':''}" data-category="${c}" aria-pressed="${c===category}">${c}</button>`).join('');}
 function renderProducts(){let list=products.filter(p=>(category==='All products'||p.category===category)&&(`${p.name} ${p.category} ${p.description}`.toLowerCase().includes(query)));if(sort==='price-low')list.sort((a,b)=>a.price-b.price);if(sort==='price-high')list.sort((a,b)=>b.price-a.price);if(sort==='rating')list.sort((a,b)=>b.rating-a.rating||b.reviews-a.reviews);$('result-line').textContent=`Showing ${list.length} ${list.length===1?'product':'products'}`;$('empty-results').hidden=list.length>0;$('product-grid').innerHTML=list.map(p=>`<article class="product-card"><div class="product-image" style="background:${p.color}" role="button" tabindex="0" aria-label="View ${p.name}" data-detail="${p.id}">${p.badge?`<span class="badge">${p.badge}</span>`:''}<span class="product-emoji" aria-hidden="true">${p.emoji}</span><button class="quick-add" data-add="${p.id}" aria-label="Add ${p.name} to cart">+</button></div><div class="product-info"><span class="product-category">${p.category}</span><button class="product-name" data-detail="${p.id}">${p.name}</button><div class="rating">★★★★★ <span>${p.rating} (${p.reviews})</span></div><div class="price">${money(p.price)}</div></div></article>`).join('');}
 function renderCart(){const entries=cartEntries();const {subtotal,shipping}=totals();$('cart-items').innerHTML=entries.length?entries.map(({product:p,qty})=>`<div class="cart-item"><div class="cart-thumb" style="background:${p.color}" aria-hidden="true">${p.emoji}</div><div class="cart-item-main"><div class="cart-item-top"><span class="cart-item-title">${p.name}</span><span class="cart-item-price">${money(p.price*qty)}</span></div><small>${p.category}</small><div class="cart-controls"><div class="quantity-control"><button data-qty="${p.id}" data-delta="-1" aria-label="Remove one ${p.name}">−</button><span>${qty}</span><button data-qty="${p.id}" data-delta="1" aria-label="Add one ${p.name}">+</button></div><button class="remove-button" data-remove="${p.id}">Remove</button></div></div></div>`).join(''):`<div class="cart-empty"><div class="empty-icon">♧</div><h3>Your cart is empty</h3><p>There are good things waiting to be discovered.</p><button class="secondary-button" id="continue-shopping">Continue shopping</button></div>`;$('cart-footer').innerHTML=entries.length?`<div class="summary-row"><span>Subtotal</span><strong>${money(subtotal)}</strong></div><div class="summary-row"><span>Shipping</span><span>${shipping?money(shipping):'Free'}</span></div><p class="shipping-note">${shipping?`${money(75-subtotal)} away from free shipping`:'You unlocked free shipping!'}</p><button class="primary-button" id="checkout-button">Review & checkout <span>↗</span></button>`:'';}
-function renderDetail(id){const p=products.find(x=>x.id===id);if(!p)return;$('detail-content').innerHTML=`<div class="detail-layout"><div class="detail-image" style="background:${p.color}"><span aria-hidden="true">${p.emoji}</span></div><div class="detail-info"><span class="eyebrow">${p.category.toUpperCase()}</span><h2>${p.name}</h2><div class="detail-rating">★★★★★ <span>${p.rating} · ${p.reviews} reviews</span></div><div class="detail-price">${money(p.price)}</div><p class="detail-description">${p.description}</p>${p.features.map(f=>`<p class="detail-feature">${f}</p>`).join('')}<button class="primary-button" data-add="${p.id}">Add to cart <span>↗</span></button></div></div>`;openLayer('detail-modal');}
+function escapeHtml(value){return String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
+function customerReviewsMarkup(reviews){
+  const validReviews=reviews.filter(review=>review&&Number.isInteger(review.rating)&&review.rating>=1&&review.rating<=5&&typeof review.name==='string'&&typeof review.comment==='string');
+  if(!validReviews.length)return '<p class="reviews-empty">No customer reviews yet. Be the first to share your experience.</p>';
+  const average=validReviews.reduce((sum,review)=>sum+review.rating,0)/validReviews.length;
+  return `<div class="customer-review-summary"><strong>${average.toFixed(1)} out of 5</strong><span>${'★'.repeat(Math.round(average))} · ${validReviews.length} ${validReviews.length===1?'review':'reviews'}</span></div><div class="customer-review-list">${validReviews.map(review=>{const date=Date.parse(review.createdAt);const dateLabel=Number.isNaN(date)?'':new Date(date).toLocaleDateString();return `<article class="customer-review"><div class="customer-review-heading"><strong>${escapeHtml(review.name)}</strong><span>${'★'.repeat(review.rating)}${'☆'.repeat(5-review.rating)}</span><time>${escapeHtml(dateLabel)}</time></div><p>${escapeHtml(review.comment)}</p></article>`;}).join('')}</div>`;
+}
+async function loadProductReviews(id){
+  const status=$('reviews-status');
+  try{
+    const response=await fetch(`/api/reviews?productId=${id}`);
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error||'Could not load reviews.');
+    if(currentDetailId!==id)return;
+    $('customer-reviews').innerHTML=customerReviewsMarkup(Array.isArray(result)?result:[]);
+    status.textContent='';
+  }catch(error){
+    if(currentDetailId===id)status.textContent=error.message||'Could not load reviews.';
+  }
+}
+async function submitReview(event){
+  event.preventDefault();
+  const form=event.target;
+  const feedback=form.querySelector('.review-feedback');
+  const button=form.querySelector('button[type="submit"]');
+  if(!form.reportValidity())return;
+  const selectedRating=form.querySelector('input[name="rating"]:checked');
+  button.disabled=true;
+  feedback.textContent='Submitting your review...';
+  feedback.classList.remove('error');
+  try{
+    const response=await fetch('/api/reviews',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:currentDetailId,rating:Number(selectedRating.value),name:$('review-name').value,comment:$('review-comment').value})});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error||'Could not submit your review.');
+    form.reset();
+    await loadProductReviews(currentDetailId);
+    feedback.textContent='Thanks for sharing your review.';
+  }catch(error){
+    feedback.textContent=error.message||'Could not submit your review.';
+    feedback.classList.add('error');
+  }finally{
+    button.disabled=false;
+  }
+}
+function renderDetail(id){const p=products.find(x=>x.id===id);if(!p)return;currentDetailId=id;$('detail-content').innerHTML=`<div class="detail-layout"><div class="detail-image" style="background:${p.color}"><span aria-hidden="true">${p.emoji}</span></div><div class="detail-info"><span class="eyebrow">${p.category.toUpperCase()}</span><h2>${p.name}</h2><div class="detail-rating">★★★★★ <span>${p.rating} · ${p.reviews} catalog rating${p.reviews===1?'':'s'}</span></div><div class="detail-price">${money(p.price)}</div><p class="detail-description">${p.description}</p>${p.features.map(f=>`<p class="detail-feature">${f}</p>`).join('')}<button class="primary-button" data-add="${p.id}">Add to cart <span>↗</span></button></div></div><section class="reviews-section" aria-labelledby="reviews-heading"><div class="reviews-section-heading"><div><span class="eyebrow">CUSTOMER FEEDBACK</span><h3 id="reviews-heading">Customer reviews</h3></div><button type="button" class="secondary-button review-write-button" data-write-review>Write a review</button></div><p id="reviews-status" class="reviews-status" role="status">Loading reviews...</p><div id="customer-reviews"></div><form id="review-form" class="review-form"><h4>Share your experience</h4><fieldset class="review-rating-field"><legend>Your rating</legend><div class="review-rating-options">${[5,4,3,2,1].map(rating=>`<label><input type="radio" name="rating" value="${rating}" required><span aria-label="${rating} ${rating===1?'star':'stars'}">★</span></label>`).join('')}</div></fieldset><div class="field"><label for="review-name">Your name</label><input id="review-name" name="name" required minlength="2" maxlength="60" autocomplete="name"></div><div class="field"><label for="review-comment">Your review</label><textarea id="review-comment" name="comment" required maxlength="1000" rows="4"></textarea></div><p class="review-feedback" role="status" aria-live="polite"></p><button class="primary-button" type="submit">Submit review <span>↗</span></button></form></section>`;openLayer('detail-modal');void loadProductReviews(id);}
 function renderCheckout(){const entries=cartEntries();if(!entries.length)return;const {subtotal,shipping,total}=totals();$('checkout-content').innerHTML=`<div class="checkout-body"><form class="checkout-form" id="checkout-form"><h3>Contact & delivery</h3><div class="field-grid"><div class="field full"><label for="email">Email address</label><input id="email" type="email" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="first-name">First name</label><input id="first-name" autocomplete="given-name" required></div><div class="field"><label for="last-name">Last name</label><input id="last-name" autocomplete="family-name" required></div><div class="field full"><label for="address">Street address</label><input id="address" autocomplete="street-address" required></div><div class="field"><label for="city">City</label><input id="city" autocomplete="address-level2" required></div><div class="field"><label for="state">State</label><input id="state" autocomplete="address-level1" required></div><div class="field"><label for="zip">ZIP code</label><input id="zip" autocomplete="postal-code" inputmode="numeric" required></div></div><div class="form-section"><h3>Dummy payment</h3><p class="payment-note">Demo checkout only. No real payment is processed or card details stored.</p><div class="field-grid"><div class="field full"><label for="card-name">Name on card</label><input id="card-name" autocomplete="cc-name" required></div><div class="field full"><label for="card-number">Card number</label><input id="card-number" inputmode="numeric" pattern="[0-9 ]{13,23}" maxlength="23" placeholder="4242 4242 4242 4242" required></div><div class="field"><label for="expiry">Expiry (MM/YY)</label><input id="expiry" inputmode="numeric" pattern="(0[1-9]|1[0-2])/[0-9]{2}" maxlength="5" placeholder="12/28" required></div><div class="field"><label for="cvv">CVV</label><input id="cvv" inputmode="numeric" pattern="[0-9]{3,4}" maxlength="4" placeholder="123" required></div></div></div><button class="primary-button" type="submit">Place demo order · ${money(total)} <span>↗</span></button></form><div class="checkout-summary"><h3>Order summary</h3>${entries.map(({product:p,qty})=>`<div class="checkout-item"><span>${p.emoji} &nbsp; ${p.name} × ${qty}</span><strong>${money(p.price*qty)}</strong></div>`).join('')}<div class="checkout-totals"><div class="summary-row"><span>Subtotal</span><span>${money(subtotal)}</span></div><div class="summary-row"><span>Shipping</span><span>${shipping?money(shipping):'Free'}</span></div><div class="summary-row total"><span>Total</span><strong>${money(total)}</strong></div></div></div></div>`;}
 async function placeOrder(event){
   event.preventDefault();
@@ -63,7 +108,8 @@ async function placeOrder(event){
 $('filters').addEventListener('click',e=>{const b=e.target.closest('[data-category]');if(!b)return;category=b.dataset.category;renderFilters();renderProducts();});
 $('product-grid').addEventListener('click',e=>{const add=e.target.closest('[data-add]');if(add){addToCart(Number(add.dataset.add));return;}const detail=e.target.closest('[data-detail]');if(detail)renderDetail(Number(detail.dataset.detail));});
 $('product-grid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.product-image')){e.preventDefault();renderDetail(Number(e.target.dataset.detail));}});
-$('detail-content').addEventListener('click',e=>{const b=e.target.closest('[data-add]');if(b)addToCart(Number(b.dataset.add));});
+$('detail-content').addEventListener('click',e=>{const b=e.target.closest('[data-add]');if(b){addToCart(Number(b.dataset.add));return;}if(e.target.closest('[data-write-review]')){$('review-form').scrollIntoView({behavior:'smooth',block:'start'});$('review-name').focus({preventScroll:true});}});
+$('detail-content').addEventListener('submit',e=>{if(e.target.id==='review-form')void submitReview(e);});
 $('cart-items').addEventListener('click',e=>{const qty=e.target.closest('[data-qty]');const remove=e.target.closest('[data-remove]');if(qty)changeQuantity(Number(qty.dataset.qty),Number(qty.dataset.delta));if(remove){delete cart[remove.dataset.remove];saveCart();}if(e.target.id==='continue-shopping')closeLayer();});
 $('cart-footer').addEventListener('click',e=>{if(e.target.closest('#checkout-button')){renderCheckout();switchLayer('checkout-modal');}});
 $('checkout-content').addEventListener('submit',placeOrder);

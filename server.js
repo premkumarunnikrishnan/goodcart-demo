@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 
 const root = __dirname;
 const ordersFile = process.env.GOODCART_ORDERS_FILE || path.join(root, 'data', 'orders.json');
+const reviewsFile = process.env.GOODCART_REVIEWS_FILE || path.join(root, 'data', 'reviews.json');
 const port = Number(process.env.PORT || 3000);
 const catalog = new Map([
   [1, ['Everyday Ceramic Mug', 24]], [2, ['Cloud Soft Throw', 49]],
@@ -14,6 +15,7 @@ const catalog = new Map([
   [9, ['Modern Planter', 35]], [10, ['Weekend Sunglasses', 42]],
   [11, ['Desktop Organizer', 26]], [12, ['Cozy Reading Light', 22]]
 ]);
+const reviewCatalog = new Set(catalog.keys());
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
@@ -25,6 +27,7 @@ const staticFiles = new Map([
   ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']]
 ]);
 let writeQueue = Promise.resolve();
+let reviewWriteQueue = Promise.resolve();
 
 function send(res, status, value) {
   const body = JSON.stringify(value);
@@ -34,6 +37,26 @@ function send(res, status, value) {
 async function readOrders() {
   try { return JSON.parse(await fs.readFile(ordersFile, 'utf8')).map(order => ({...order, status:order.status === 'New' ? 'Processing' : order.status})); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+async function readReviews() {
+  try {
+    const reviews = JSON.parse(await fs.readFile(reviewsFile, 'utf8'));
+    if (!Array.isArray(reviews)) throw new Error('Review storage has an invalid format.');
+    return reviews;
+  } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+function updateReviews(change) {
+  const task = reviewWriteQueue.then(async () => {
+    const reviews = await readReviews();
+    const result = change(reviews);
+    await fs.mkdir(path.dirname(reviewsFile), {recursive:true});
+    const temporary = reviewsFile + '.tmp';
+    await fs.writeFile(temporary, JSON.stringify(reviews, null, 2));
+    await fs.rename(temporary, reviewsFile);
+    return result;
+  });
+  reviewWriteQueue = task.catch(() => {});
+  return task;
 }
 function publicOrder(order) {
   const {cleanupToken, cleanupTokenHash, ...visible} = order;
@@ -92,10 +115,35 @@ function createOrder(input) {
     ...(cleanupToken ? {cleanupToken, cleanupTokenHash:crypto.createHash('sha256').update(cleanupToken).digest('hex')} : {})
   };
 }
+function createReview(input) {
+  if (!input || typeof input !== 'object' || !Number.isInteger(input.productId) || !reviewCatalog.has(input.productId)) throw new Error('Review product is invalid.');
+  if (!Number.isInteger(input.rating) || input.rating < 1 || input.rating > 5) throw new Error('Review rating must be an integer from 1 to 5.');
+  if (!validText(input.name, 60) || input.name.trim().length < 2) throw new Error('Review name must be between 2 and 60 characters.');
+  if (!validText(input.comment, 1000)) throw new Error('Review comment must be between 1 and 1000 characters.');
+  return {
+    id:'RV-' + crypto.randomBytes(8).toString('hex').toUpperCase(),
+    productId:input.productId,
+    rating:input.rating,
+    name:input.name.trim(),
+    comment:input.comment.trim(),
+    createdAt:new Date().toISOString()
+  };
+}
 
 const server = http.createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (pathname === '/api/reviews' && req.method === 'GET') {
+      const productId = new URL(req.url, 'http://localhost').searchParams.get('productId');
+      if (productId !== null && (!/^\d+$/.test(productId) || !reviewCatalog.has(Number(productId)))) return send(res, 400, {error:'Review product is invalid.'});
+      const reviews = await readReviews();
+      return send(res, 200, reviews.filter(review => productId === null || review.productId === Number(productId)).sort((a,b) => b.createdAt.localeCompare(a.createdAt)));
+    }
+    if (pathname === '/api/reviews' && req.method === 'POST') {
+      const review = createReview(await bodyJson(req));
+      await updateReviews(reviews => { reviews.push(review); return review; });
+      return send(res, 201, review);
+    }
     if (pathname === '/api/orders' && req.method === 'GET') return send(res, 200, (await readOrders()).map(publicOrder));
     if (pathname === '/api/orders' && req.method === 'POST') {
       const order = createOrder(await bodyJson(req));
@@ -143,8 +191,8 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 404, {error:'Not found.'});
   } catch (error) {
-    send(res, error.message === 'Invalid JSON.' || error.message === 'Request is too large.' || error.message.startsWith('Cart ') || error.message.startsWith('Please ') ? 400 : 500, {error:error.message});
+    send(res, error.message === 'Invalid JSON.' || error.message === 'Request is too large.' || error.message.startsWith('Cart ') || error.message.startsWith('Please ') || error.message.startsWith('Review ') ? 400 : 500, {error:error.message});
   }
 });
 if (require.main === module) server.listen(port, '127.0.0.1', () => console.log(`GoodCart running at http://127.0.0.1:${port}`));
-module.exports = {server,createOrder,publicOrder,canCleanupOrder};
+module.exports = {server,createOrder,createReview,publicOrder,canCleanupOrder};
